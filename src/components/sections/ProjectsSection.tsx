@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useAnimation as useGlobalAnimation } from '@/contexts/AnimationContext';
 import { AnimatedCard } from '@/components/ui/animated-card';
@@ -42,6 +42,41 @@ const projects = [
   },
 ] as const;
 
+// Memoized Project Button Component
+const ProjectButton = React.memo(({ 
+  children, 
+  icon, 
+  href 
+}: { 
+  children: React.ReactNode;
+  icon: React.ReactNode;
+  href: string;
+}) => (
+  <motion.a
+    href={href}
+    target="_blank"
+    rel="noopener noreferrer"
+    className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+    whileHover={{ scale: 1.05 }}
+    whileTap={{ scale: 0.95 }}
+    onClick={(e) => {
+      e.stopPropagation();
+      window.open(href, '_blank', 'noopener,noreferrer');
+    }}
+    onMouseDown={(e) => {
+      e.stopPropagation();
+    }}
+    onTouchStart={(e) => {
+      e.stopPropagation();
+    }}
+  >
+    {icon}
+    <span className="ml-2">{children}</span>
+  </motion.a>
+));
+
+ProjectButton.displayName = 'ProjectButton';
+
 const ProjectsSection = () => {
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
   const { isPaused } = useGlobalAnimation();
@@ -53,89 +88,175 @@ const ProjectsSection = () => {
   const [canScrollLeft, setCanScrollLeft] = React.useState(false);
   const [canScrollRight, setCanScrollRight] = React.useState(true);
   const touchStartRef = React.useRef<number | null>(null);
+  const [dragDistance, setDragDistance] = React.useState(0);
+  const [isHovering, setIsHovering] = React.useState(false);
+  const DRAG_THRESHOLD = 5;
+  const scrollTimeout = useRef<NodeJS.Timeout>();
 
-  // Check scroll position to update navigation arrows
-  const checkScrollPosition = () => {
+  // Memoize handlers
+  const checkScrollPosition = useCallback(() => {
     if (!scrollContainerRef.current) return;
     
     const { scrollLeft, scrollWidth, clientWidth } = scrollContainerRef.current;
     setCanScrollLeft(scrollLeft > 0);
     setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 10);
     
-    // Update active index based on scroll position
-    const cardWidth = 400; // Width of one card
+    const cardWidth = 400;
     const newIndex = Math.round(scrollLeft / cardWidth);
     setActiveIndex(newIndex % projects.length);
-  };
-
-  React.useEffect(() => {
-    checkScrollPosition();
-    window.addEventListener('resize', checkScrollPosition);
-    return () => window.removeEventListener('resize', checkScrollPosition);
   }, []);
 
-  // Handle scroll events
-  const handleScroll = () => {
-    checkScrollPosition();
-    setIsProjectPaused(true);
-    const timeoutId = setTimeout(() => setIsProjectPaused(false), 1000);
-    return () => clearTimeout(timeoutId);
-  };
-
-  // Handle mouse/touch events
-  const handleDragStart = (e: React.MouseEvent | React.TouchEvent) => {
-    setIsProjectPaused(true);
-    setIsDragging(true);
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    setDragStartX(clientX);
-    if (scrollContainerRef.current) {
-      setScrollStartX(scrollContainerRef.current.scrollLeft);
-    }
-  };
-
-  const handleDragMove = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!isDragging || !scrollContainerRef.current) return;
-    e.preventDefault();
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const drag = dragStartX - clientX;
-    scrollContainerRef.current.scrollLeft = scrollStartX + drag;
-  };
-
-  const handleDragEnd = () => {
-    setIsDragging(false);
-    setTimeout(() => setIsProjectPaused(false), 1000);
-  };
-
-  // Handle arrow navigation
-  const scroll = (direction: 'left' | 'right') => {
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     if (!scrollContainerRef.current) return;
     
-    const scrollAmount = 400; // Width of one card
+    const container = scrollContainerRef.current;
+    const scrollLeft = container.scrollLeft;
+    const containerWidth = container.clientWidth;
+    const newIndex = Math.round(scrollLeft / containerWidth);
+    
+    setActiveIndex(newIndex);
+    
+    // Check scroll position for navigation buttons
+    const maxScroll = container.scrollWidth - container.clientWidth;
+    setCanScrollLeft(scrollLeft > 0);
+    setCanScrollRight(scrollLeft < maxScroll);
+
+    // Clear existing timeout
+    if (scrollTimeout.current) {
+      clearTimeout(scrollTimeout.current);
+    }
+
+    // Set new timeout for chat prompt
+    scrollTimeout.current = setTimeout(() => {
+      // Removed code here
+    }, 1000);
+  }, []);
+
+  const scroll = useCallback((direction: 'left' | 'right') => {
+    if (!scrollContainerRef.current) return;
+    
+    const scrollAmount = 400;
     const newScrollLeft = scrollContainerRef.current.scrollLeft + (direction === 'left' ? -scrollAmount : scrollAmount);
     
     scrollContainerRef.current.scrollTo({
       left: newScrollLeft,
       behavior: 'smooth'
     });
-  };
+  }, []);
 
-  // Handle touch events
-  const handleTouchStart = (e: React.TouchEvent) => {
+  // Memoize navigation buttons
+  const navigationButtons = useMemo(() => ({
+    left: canScrollLeft && (
+      <motion.button
+        onClick={() => scroll('left')}
+        className="absolute left-4 top-1/2 -translate-y-1/2 z-10 p-3 bg-white/90 dark:bg-[#191716]/90 rounded-full shadow-lg backdrop-blur-sm border border-gray-200 dark:border-gray-800"
+        whileHover={{ scale: 1.1, y: '-50%' }}
+        whileTap={{ scale: 0.95, y: '-50%' }}
+        initial={{ y: '-50%' }}
+        aria-label="Scroll left"
+      >
+        <ChevronLeft className="w-6 h-6 text-gray-700 dark:text-gray-300" />
+      </motion.button>
+    ),
+    right: canScrollRight && (
+      <motion.button
+        onClick={() => scroll('right')}
+        className="absolute right-4 top-1/2 -translate-y-1/2 z-10 p-3 bg-white/90 dark:bg-[#191716]/90 rounded-full shadow-lg backdrop-blur-sm border border-gray-200 dark:border-gray-800"
+        whileHover={{ scale: 1.1, y: '-50%' }}
+        whileTap={{ scale: 0.95, y: '-50%' }}
+        initial={{ y: '-50%' }}
+        aria-label="Scroll right"
+      >
+        <ChevronRight className="w-6 h-6 text-gray-700 dark:text-gray-300" />
+      </motion.button>
+    )
+  }), [canScrollLeft, canScrollRight, scroll]);
+
+  const handleDragStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    // Don't initiate drag if clicking on a button or link
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'A' || target.closest('a') || 
+        target.tagName === 'BUTTON' || target.closest('button')) {
+      return;
+    }
+
+    setIsProjectPaused(true);
+    setIsDragging(true);
+    setDragDistance(0);
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    setDragStartX(clientX);
+    if (scrollContainerRef.current) {
+      setScrollStartX(scrollContainerRef.current.scrollLeft);
+    }
+  }, []);
+
+  const handleDragMove = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    if (!isDragging || !scrollContainerRef.current) return;
+    
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const distance = Math.abs(dragStartX - clientX);
+    setDragDistance(distance);
+    
+    if (distance > DRAG_THRESHOLD) {
+      e.preventDefault();
+      const drag = dragStartX - clientX;
+      scrollContainerRef.current.scrollLeft = scrollStartX + drag;
+    }
+  }, [isDragging, dragStartX, scrollStartX]);
+
+  const handleDragEnd = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    if (dragDistance <= DRAG_THRESHOLD) {
+      // If the movement was small, treat it as a click
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'A' || target.closest('a')) {
+        // Don't interfere with link clicks
+        return;
+      }
+    }
+    setIsDragging(false);
+    setTimeout(() => setIsProjectPaused(false), 1000);
+  }, [dragDistance]);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
     touchStartRef.current = e.touches[0].clientX;
     setIsProjectPaused(true);
     setIsDragging(true);
     if (scrollContainerRef.current) {
       setScrollStartX(scrollContainerRef.current.scrollLeft);
     }
-  };
+  }, []);
 
-  const handleTouchMove = (e: React.TouchEvent) => {
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
     if (!isDragging || !scrollContainerRef.current || touchStartRef.current === null) return;
     
     const touch = e.touches[0];
     const drag = touchStartRef.current - touch.clientX;
     scrollContainerRef.current.scrollLeft = scrollStartX + drag;
-  };
+  }, [isDragging, scrollStartX]);
+
+  const handleMouseEnter = useCallback(() => {
+    setIsHovering(true);
+    setIsProjectPaused(true);
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    setIsHovering(false);
+    setIsProjectPaused(false);
+  }, []);
+
+  useEffect(() => {
+    checkScrollPosition();
+    window.addEventListener('resize', checkScrollPosition);
+    return () => window.removeEventListener('resize', checkScrollPosition);
+  }, [checkScrollPosition]);
+
+  useEffect(() => {
+    return () => {
+      if (scrollTimeout.current) {
+        clearTimeout(scrollTimeout.current);
+      }
+    };
+  }, []);
 
   return (
     <section id="projects" className="py-20 overflow-hidden">
@@ -150,28 +271,8 @@ const ProjectsSection = () => {
         
         <div className="relative mt-10">
           {/* Navigation arrows with improved visibility */}
-          {canScrollLeft && (
-            <motion.button
-              onClick={() => scroll('left')}
-              className="absolute left-4 top-1/2 -translate-y-1/2 z-10 p-3 bg-white/90 dark:bg-[#191716]/90 rounded-full shadow-lg backdrop-blur-sm border border-gray-200 dark:border-gray-800 hover:scale-110 transition-transform"
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
-              aria-label="Scroll left"
-            >
-              <ChevronLeft className="w-6 h-6 text-gray-700 dark:text-gray-300" />
-            </motion.button>
-          )}
-          {canScrollRight && (
-            <motion.button
-              onClick={() => scroll('right')}
-              className="absolute right-4 top-1/2 -translate-y-1/2 z-10 p-3 bg-white/90 dark:bg-[#191716]/90 rounded-full shadow-lg backdrop-blur-sm border border-gray-200 dark:border-gray-800 hover:scale-110 transition-transform"
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
-              aria-label="Scroll right"
-            >
-              <ChevronRight className="w-6 h-6 text-gray-700 dark:text-gray-300" />
-            </motion.button>
-          )}
+          {navigationButtons.left}
+          {navigationButtons.right}
           
           {/* Project cards container */}
           <div 
@@ -181,11 +282,16 @@ const ProjectsSection = () => {
             onMouseDown={handleDragStart}
             onMouseMove={handleDragMove}
             onMouseUp={handleDragEnd}
-            onMouseLeave={handleDragEnd}
+            onMouseLeave={(e) => {
+              handleDragEnd(e);
+              handleMouseLeave();
+            }}
+            onMouseEnter={handleMouseEnter}
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}
             onTouchEnd={handleDragEnd}
             style={{ 
+              pointerEvents: 'auto',
               cursor: isDragging ? 'grabbing' : 'grab',
               touchAction: 'pan-y pinch-zoom',
               WebkitOverflowScrolling: 'touch',
@@ -194,7 +300,7 @@ const ProjectsSection = () => {
           >
             <motion.div
               className="flex gap-6 min-w-max relative"
-              animate={!isProjectPaused ? { 
+              animate={!isProjectPaused && !isHovering ? { 
                 x: [0, '-100%']
               } : {}}
               transition={{
@@ -262,7 +368,12 @@ const ProjectsSection = () => {
                     </div>
                   </CardContent>
 
-                  <CardFooter className="mt-auto space-x-2">
+                  <CardFooter 
+                    className="mt-auto space-x-2" 
+                    style={{ cursor: 'default' }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onTouchStart={(e) => e.stopPropagation()}
+                  >
                     <ProjectButton
                       href={project.demoLink}
                       icon={<ExternalLink className="w-4 h-4" />}
@@ -300,28 +411,5 @@ const ProjectsSection = () => {
     </section>
   );
 };
-
-// Project Button Component
-const ProjectButton = ({ 
-  children, 
-  icon, 
-  href 
-}: { 
-  children: React.ReactNode;
-  icon: React.ReactNode;
-  href: string;
-}) => (
-  <motion.a
-    href={href}
-    target="_blank"
-    rel="noopener noreferrer"
-    className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-    whileHover={{ scale: 1.05 }}
-    whileTap={{ scale: 0.95 }}
-  >
-    {icon}
-    <span className="ml-2">{children}</span>
-  </motion.a>
-);
 
 export default ProjectsSection;
